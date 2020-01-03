@@ -34,20 +34,32 @@ if (mode == 'spatial' and pretrain_dataset == 'Anet') or pretrain_dataset == 'Kn
     feature_dim = 2048
 else:
     feature_dim = 1024
-
+# 保存模型参数
 models_dir = get_models_dir(mode, pretrain_dataset, method)
+# 保存模型参数文件名称的前缀
 models_file_prefix = join(models_dir, 'model-ep')
+# 测试时加载的模型名称
 test_checkpoint_file = join(models_dir, 'model-ep-30')
+# 保存预测结果文件‘.csv’
 predict_file = get_predict_result_path(mode, pretrain_dataset, method)
 
 
 ######################################### TRAIN ##########################################
 
 def train_operation(X, Y_label, Y_bbox, Index, LR, config):
+    '''
+    :param X: 提取的图像特征 ----> shape=[batch_size, length, feature_dim]
+    :param Y_label: classes: 0,1,....,20 ----> shape=[None, num_classes]
+    :param Y_bbox: ----> [None, 3]
+    :param Index:
+    :param LR: learning rate
+    :param config:
+    :return:
+    '''
     bsz = config.batch_size
     ncls = config.num_classes
 
-    net = base_feature_network(X)
+    net = base_feature_network(X) # [batch_size, 32, 512]
     MALs = main_anchor_layer(net)
     pBALs = branch_anchor_layer(MALs, 'ProposalBranch')
     cBALs = branch_anchor_layer(MALs, 'ClassificationBranch')
@@ -162,12 +174,12 @@ def train_operation(X, Y_label, Y_bbox, Index, LR, config):
 
 
 def train_main(config):
-    bsz = config.batch_size
+    bsz = config.batch_size # batch_size
 
     tf.set_random_seed(config.seed)
-    X = tf.placeholder(tf.float32, shape=(bsz, config.input_steps, feature_dim))
-    Y_label = tf.placeholder(tf.int32, [None, config.num_classes])
-    Y_bbox = tf.placeholder(tf.float32, [None, 3])
+    X = tf.placeholder(tf.float32, shape=(bsz, config.input_steps, feature_dim)) # 提取的图像特征
+    Y_label = tf.placeholder(tf.int32, [None, config.num_classes]) # classes: 0,1,....,20
+    Y_bbox = tf.placeholder(tf.float32, [None, 3]) #
     Index = tf.placeholder(tf.int32, [bsz + 1])
     LR = tf.placeholder(tf.float32)
 

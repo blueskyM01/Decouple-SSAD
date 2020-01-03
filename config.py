@@ -21,7 +21,7 @@ class Config(object):
 
     def __init__(self):
         # common information
-        self.feature_path = "data/THUMOS14/feature/"
+        self.feature_path = "/media/yang/E/dataset/Decouple_-SSAD/data/THUMOS14/feature/"
         self.train_split_set = 'val'
         self.test_split_set = 'test'
         self.window_size = 512

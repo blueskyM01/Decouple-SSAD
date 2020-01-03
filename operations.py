@@ -115,16 +115,19 @@ def default_box(layer_steps, scale, a_ratios):
 
 def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
     if pre_rx == None:
+        # dboxes_w: width of an anchors (scale)
+        # dboxes_x: centers of an anchors (scale)
         dboxes_w, dboxes_x = default_box(config.num_anchors[layer_name],
                                          config.scale[layer_name], config.aspect_ratios[layer_name])
     else:
         dboxes_x = pre_rx
         dboxes_w = pre_rw
-    anchors_conf = anchors[:, :, -3]
+    anchors_conf = anchors[:, :, -3] # overlap of network out put
     # anchors_conf=tf.nn.sigmoid(anchors_conf)
-    anchors_rx = anchors[:, :, -2]
-    anchors_rw = anchors[:, :, -1]
+    anchors_rx = anchors[:, :, -2] # center of network out put
+    anchors_rw = anchors[:, :, -1] # width of network out put
 
+    # anchors_rx, anchors_rw: 统一到感受野缩小的尺度(反解偏差量)
     anchors_rx = anchors_rx * dboxes_w * 0.1 + dboxes_x
     anchors_rw = tf.exp(0.1 * anchors_rw) * dboxes_w
 
@@ -139,6 +142,9 @@ def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
 # the matched ground truth may be positive/negative,
 # the matched x,w,labels,scores all corresponding to this anchor
 def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, pre_rx=None, pre_rw=None):
+    '''
+    :param anchors: output of the network ----> shape=[bs, totoal anchors, classes + 3]  3: overlap, d_c, d_w
+    '''
     num_anchors = config.num_anchors[layer_name]
     num_dbox = config.num_dbox[layer_name]
     # num_classes = config.num_classes
@@ -244,6 +250,9 @@ def base_feature_network(X, mode=''):
 
 
 def main_anchor_layer(net, mode=''):
+    '''
+    :param net: the output of base layer ----> shape=[batch_size, 32, 512]
+    '''
     # main network
     initer = tf.contrib.layers.xavier_initializer(seed=5)
     with tf.variable_scope("main_anchor_layer" + mode):
