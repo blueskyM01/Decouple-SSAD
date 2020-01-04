@@ -21,14 +21,20 @@ from config import Config, get_models_dir, get_predict_result_path
 import time
 from os.path import join
 import sys
-
+import time
 ####################################### PARAMETERS ########################################
 
-stage = sys.argv[1]  # train/test/fuse/train_test_fuse
-pretrain_dataset = sys.argv[2]  # UCF101/KnetV3
-mode = sys.argv[3]  # temporal/spatial
-method = sys.argv[4]
-method_temporal = sys.argv[5]  # used for final result fusing
+# stage = sys.argv[1]  # train/test/fuse/train_test_fuse
+# pretrain_dataset = sys.argv[2]  # UCF101/KnetV3
+# mode = sys.argv[3]  # temporal/spatial
+# method = sys.argv[4]
+# method_temporal = sys.argv[5]  # used for final result fusing
+
+stage = 'train_test_fuse'  # train/test/fuse/train_test_fuse
+pretrain_dataset = 'UCF101'  # UCF101/KnetV3
+mode = 'temporal'  # temporal/spatial
+method = 'decouple_ssad'
+method_temporal = 'decouple_ssad'  # used for final result fusing
 
 if (mode == 'spatial' and pretrain_dataset == 'Anet') or pretrain_dataset == 'KnetV3':
     feature_dim = 2048
