@@ -39,6 +39,25 @@ def abs_smooth(x):
 
 
 def jaccard_with_anchors(anchors_min, anchors_max, len_anchors, box_min, box_max):
+    '''
+    Introduction: compute the iou of each anchors and a box
+    @param anchors_min: shape=[totoal_anchors]
+    @param anchors_max: shape=[totoal_anchors]
+    @param len_anchors: the length of anchors ----> shape=[totoal_anchors]
+    @param box_min: float, not array
+    @param box_max: float, not array
+    @return:
+            jaccard: the iou between each anchors and a box
+            for example:
+                input:
+                anchors_min = tf.constant([7, 15, 24], dtype=tf.float32)
+                anchors_max = tf.constant([10, 20, 32], dtype=tf.float32)
+                len_anchors = anchors_max - anchors_min
+                box_min = 15
+                box_max = 26
+                output:
+                [0., 0.45454547, 0.11764706]
+    '''
     """Compute jaccard score between a box and the anchors.
     """
 
@@ -54,27 +73,56 @@ def jaccard_with_anchors(anchors_min, anchors_max, len_anchors, box_min, box_max
 
 def loop_condition(idx, b_anchors_rx, b_anchors_rw, b_glabels, b_gbboxes,
                    b_match_x, b_match_w, b_match_labels, b_match_scores):
+    '''
+    A=[[1,2,3],
+       [4,5,6]]
+    i=[[1,2,3],
+       [1,2,3]]
+    r = tf.less(i, A)
+    with tf.Session() as sess:
+        print(sess.run(r))#[[False False False]
+                          # [ True  True  True]]
+    '''
     r = tf.less(idx, tf.shape(b_glabels))
     return r[0]
 
 
 def loop_body(idx, b_anchors_rx, b_anchors_rw, b_glabels, b_gbboxes,
               b_match_x, b_match_w, b_match_labels, b_match_scores):
+    '''
+
+    @param idx:
+    @param b_anchors_rx: shape=[total_anchors]
+    @param b_anchors_rw: shape=[total_anchors]
+    @param b_glabels: shape=[None, num_classes]
+    @param b_gbboxes: shape=[None, 3]
+    @param b_match_x: shape=[total_anchors], init: 0
+    @param b_match_w: shape=[total_anchors], init: 0
+    @param b_match_labels: shape=[total_anchors, num_classes], init: [[1, 0, 0, ..., 0],
+                                                                      [1, 0, 0, ..., 0],
+                                                                                 .
+                                                                                 .
+                                                                                 .
+                                                                      [1, 0, 0, ..., 0]]
+    @param b_match_scores: shape=[total_anchors], init: 0
+    @return:
+    '''
     num_class = b_match_labels.get_shape().as_list()[-1]
-    label = b_glabels[idx][0:num_class]
-    box_min = b_gbboxes[idx, 0]
-    box_max = b_gbboxes[idx, 1]
+    label = b_glabels[idx][0:num_class] # shape=[num_class]
+    box_min = b_gbboxes[idx, 0] # float, not array
+    box_max = b_gbboxes[idx, 1] # float, not array
 
     # ground truth
     box_x = (box_max + box_min) / 2
     box_w = (box_max - box_min)
 
     # predict
-    anchors_min = b_anchors_rx - b_anchors_rw / 2
-    anchors_max = b_anchors_rx + b_anchors_rw / 2
+    anchors_min = b_anchors_rx - b_anchors_rw / 2 # [total_anchors]
+    anchors_max = b_anchors_rx + b_anchors_rw / 2 # [total_anchors]
 
-    len_anchors = anchors_max - anchors_min
+    len_anchors = anchors_max - anchors_min # [total_anchors]
 
+    # jaccards: shape=[total_anchors]
     jaccards = jaccard_with_anchors(anchors_min, anchors_max, len_anchors, box_min, box_max)
 
     # jaccards > b_match_scores > -0.5 & jaccards > matching_threshold
@@ -100,6 +148,15 @@ def loop_body(idx, b_anchors_rx, b_anchors_rw, b_glabels, b_gbboxes,
 
 
 def default_box(layer_steps, scale, a_ratios):
+    """
+    Introduction: generate anchors (Note: use scale)
+    @param layer_steps: num_neure at each anchor layer
+    @param scale: 1/16, 1/8, 1/4
+    @param a_ratios: [0.5, 0.75, 1, 1.5, 2] at each anchor layer
+    @return:
+            width_default: shape=(totoal_anchors,)
+            center_default: shape=(totoal_anchors,)
+    """
     width_set = [scale * ratio for ratio in a_ratios]
     center_set = [1. / layer_steps * i + 0.5 / layer_steps for i in range(layer_steps)]
     width_default = []
@@ -114,9 +171,23 @@ def default_box(layer_steps, scale, a_ratios):
 
 
 def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
+    """
+    Introduction:
+    @param anchors: output of anchor layer ----> shape=[bs, totoal anchors, classes + 3]  3: overlap, d_c, d_w
+    @param config:
+    @param layer_name: input param of variable scope
+    @param pre_rx:
+    @param pre_rw:
+    @return:
+            anchors_class: shape=[bs, totoal_anchors, num_class]
+            anchors_conf: overlap ----> shape=[bs, totoal_anchors]
+            anchors_rx: center, not offset center ----> shape=[bs, totoal_anchors]
+            anchors_rw: width, not offset width ----> shape=[bs, totoal_anchors]
+    """
     if pre_rx == None:
-        # dboxes_w: width of an anchors (scale)
-        # dboxes_x: centers of an anchors (scale)
+        # generate anchors
+        # dboxes_w: width of an anchors (note: use scale)
+        # dboxes_x: centers of an anchors (note: use scale)
         dboxes_w, dboxes_x = default_box(config.num_anchors[layer_name],
                                          config.scale[layer_name], config.aspect_ratios[layer_name])
     else:
@@ -124,10 +195,12 @@ def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
         dboxes_w = pre_rw
     anchors_conf = anchors[:, :, -3] # overlap of network out put
     # anchors_conf=tf.nn.sigmoid(anchors_conf)
-    anchors_rx = anchors[:, :, -2] # center of network out put
-    anchors_rw = anchors[:, :, -1] # width of network out put
+    anchors_rx = anchors[:, :, -2] # offset center of network out put
+    anchors_rw = anchors[:, :, -1] # offset width of network out put
 
-    # anchors_rx, anchors_rw: 统一到感受野缩小的尺度(反解偏差量)
+    # anchors_rx, anchors_rw: 反解输出层的偏差量, d_c ----> c, d_w ----> w
+    # d_x = (gt_x - anchor_x) / anchor_w
+    # d_w = log((gt_w - anchor_w) / anchor_w)
     anchors_rx = anchors_rx * dboxes_w * 0.1 + dboxes_x
     anchors_rw = tf.exp(0.1 * anchors_rw) * dboxes_w
 
@@ -144,6 +217,20 @@ def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
 def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, pre_rx=None, pre_rw=None):
     '''
     :param anchors: output of the network ----> shape=[bs, totoal anchors, classes + 3]  3: overlap, d_c, d_w
+    :param glabels: ground truth classes ----> shape=[None, num_classes]
+    :param gbboxes:  ground truth bounding boxes ----> shape=[None, 3] 3: min, max,
+    :param Index: shape=[bsz + 1]
+    :param config:
+    :param layer_name: input param of variable scope
+    :return:
+            batch_match_x: corresponding to anchors_rx
+            batch_match_w: corresponding to anchors_rw
+            batch_match_labels: corresponding to anchors_class
+            batch_match_scores: corresponding to anchors_conf
+            anchors_class: outpyt of the anchor layer ----> shape=[bs, totoal_anchors, num_class]
+            anchors_conf: outpyt of the anchor layer: overlap ----> shape=[bs, totoal_anchors]
+            anchors_rx: outpyt of the anchor layer: center, not offset center ----> shape=[bs, totoal_anchors]
+            anchors_rw: outpyt of the anchor layer: width, not offset width ----> shape=[bs, totoal_anchors]
     '''
     num_anchors = config.num_anchors[layer_name]
     num_dbox = config.num_dbox[layer_name]
@@ -151,7 +238,10 @@ def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, p
     num_classes = anchors.get_shape().as_list()[-1] - 3
 
     dtype = tf.float32
-
+    # anchors_class: shape=[bs, totoal_anchors, num_class]
+    # anchors_conf: overlap ----> shape=[bs, totoal_anchors]
+    # anchors_rx: center, not offset center ----> shape=[bs, totoal_anchors]
+    # anchors_rw: width, not offset width ----> shape=[bs, totoal_anchors]
     anchors_class, anchors_conf, anchors_rx, anchors_rw = \
         anchor_box_adjust(anchors, config, layer_name, pre_rx, pre_rw)
 
@@ -169,13 +259,13 @@ def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, p
 
         match_labels_other = tf.ones((num_anchors * num_dbox, 1), dtype=tf.int32)
         match_labels_class = tf.zeros((num_anchors * num_dbox, num_classes - 1), dtype=tf.int32)
-        match_labels = tf.concat([match_labels_other, match_labels_class], axis=-1)
+        match_labels = tf.concat([match_labels_other, match_labels_class], axis=-1) # shape=[total_anchors, num_classes]
 
-        b_anchors_rx = anchors_rx[i]
-        b_anchors_rw = anchors_rw[i]
+        b_anchors_rx = anchors_rx[i] # shape=[num_anchors * num_dbox]
+        b_anchors_rw = anchors_rw[i] # shape=[num_anchors * num_dbox]
 
-        b_glabels = glabels[Index[i]:Index[i + 1]]
-        b_gbboxes = gbboxes[Index[i]:Index[i + 1]]
+        b_glabels = glabels[Index[i]:Index[i + 1]] # shape=[None, num_classes]
+        b_gbboxes = gbboxes[Index[i]:Index[i + 1]] # shape=[None, 3]
 
         idx = 0
         [idx, b_anchors_rx, b_anchors_rw, b_glabels, b_gbboxes,
