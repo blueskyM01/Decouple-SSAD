@@ -22,14 +22,22 @@ from config import Config, get_models_dir, get_predict_result_path
 import time
 from os.path import join
 import sys
-
+os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 ####################################### PARAMETERS ########################################
 
-stage = sys.argv[1]  # train/test/fuse/train_test_fuse
-pretrain_dataset = sys.argv[2]  # UCF101/KnetV3
-mode = sys.argv[3]  # temporal/spatial
-method = sys.argv[4]
-method_temporal = sys.argv[5]  # used for final result fusing
+# stage = sys.argv[1]  # train/test/fuse/train_test_fuse
+# pretrain_dataset = sys.argv[2]  # UCF101/KnetV3
+# mode = sys.argv[3]  # temporal/spatial
+# method = sys.argv[4]
+# method_temporal = sys.argv[5]  # used for final result fusing
+
+stage = 'train_test_fuse'  # train/test/fuse/train_test_fuse
+pretrain_dataset = 'UCF101'  # UCF101/KnetV3
+mode = 'temporal'  # temporal/spatial
+method = 'main_stream'
+method_temporal = 'main_stream'  # used for final result fusing
+
+global_step = tf.Variable(0, name='global_step', trainable=False)
 
 if (mode == 'spatial' and pretrain_dataset == 'Anet') or pretrain_dataset == 'KnetV3':
     feature_dim = 2048
@@ -91,10 +99,15 @@ def train_operation(X, Y_label, Y_bbox, Index, LR, config):
 
     loss = main_class_loss + config.p_loc * main_loc_loss + config.p_conf * main_conf_loss
 
-    trainable_variables = get_trainable_variables()
-    optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(loss, var_list=trainable_variables)
+    tf.summary.scalar('total_loss', loss)
+    tf.summary.scalar('main_class_loss', main_class_loss)
+    tf.summary.scalar('main_loc_loss', main_loc_loss)
+    tf.summary.scalar('main_conf_loss', main_conf_loss)
 
-    return optimizer, loss, trainable_variables
+    trainable_variables = get_trainable_variables()
+    optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(loss, var_list=trainable_variables, global_step=global_step)
+
+    return optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss
 
 
 def train_main(config):
@@ -107,7 +120,7 @@ def train_main(config):
     Index = tf.placeholder(tf.int32, [bsz + 1])
     LR = tf.placeholder(tf.float32)
 
-    optimizer, loss, trainable_variables = \
+    optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss = \
         train_operation(X, Y_label, Y_bbox, Index, LR, config)
 
     model_saver = tf.train.Saver(var_list=trainable_variables, max_to_keep=2)
@@ -115,6 +128,13 @@ def train_main(config):
     sess = tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=False))
 
     tf.global_variables_initializer().run()
+
+    log_dir = './logs/' + mode + pretrain_dataset + method
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    writer = tf.summary.FileWriter(log_dir, sess.graph)
+    merged = tf.summary.merge_all()
 
     # initialize parameters or restore from previous model
     if not os.path.exists(models_dir):
@@ -142,6 +162,15 @@ def train_main(config):
                          Index: batch_train_index[idx],
                          LR: config.learning_rates[epoch]}
             _, out_loss = sess.run([optimizer, loss], feed_dict=feed_dict)
+            out_main_class_loss, out_main_loc_loss, out_main_conf_loss, counter \
+                = sess.run([main_class_loss, main_loc_loss, main_conf_loss, global_step], feed_dict=feed_dict)
+
+            [merged_] = sess.run([merged], feed_dict=feed_dict)
+            writer.add_summary(merged_, counter)
+
+            print('[Epoch/Idx][%2d/%3d] totoal_loss: %2.4f, main_class_loss: %2.4f, '
+                  'main_loc_loss: %2.4f, main_conf_loss: %2.4f' % (epoch, idx, out_loss, out_main_class_loss,
+                                                                   out_main_loc_loss, out_main_conf_loss))
 
             loss_info.append(out_loss)
 
@@ -189,7 +218,9 @@ def test_main(config):
 
     anchors_class, anchors_conf, anchors_xmin, anchors_xmax = test_operation(X, config)
 
-    model_saver = tf.train.Saver()
+    # model_saver = tf.train.Saver()
+    t_vars = tf.trainable_variables()
+    model_saver = tf.train.Saver(t_vars)
     sess = tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=False))
     tf.global_variables_initializer().run()
     model_saver.restore(sess, test_checkpoint_file)
@@ -225,6 +256,14 @@ if __name__ == "__main__":
     config = Config()
     start_time = time.time()
     elapsed_time = 0
+
+    if not os.path.exists('./models'):
+        os.makedirs('./models')
+    if not os.path.exists('./logs'):
+        os.makedirs('./logs')
+    if not os.path.exists('./results'):
+        os.makedirs('./results')
+
     if stage == 'train':
         train_main(config)
         elapsed_time = time.time() - start_time
