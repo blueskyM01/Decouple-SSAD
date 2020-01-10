@@ -31,7 +31,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 # method = sys.argv[4]
 # method_temporal = sys.argv[5]  # used for final result fusing
 
-stage = 'train_test_fuse'  # train/test/fuse/train_test_fuse
+stage = 'test'  # train/test/fuse/train_test_fuse
 pretrain_dataset = 'UCF101'  # UCF101/KnetV3
 mode = 'temporal'  # temporal/spatial
 method = 'main_stream'
@@ -57,7 +57,8 @@ def train_operation(X, Y_label, Y_bbox, Index, LR, config):
     ncls = config.num_classes
 
     net = base_feature_network(X)
-    MALs = main_anchor_layer(net)
+    # MALs = main_anchor_layer(net)
+    MALs, N_lsit = mx_fuse_anchor_layer(net, config)
 
     # --------------------------- Main Stream -----------------------------
     full_mainAnc_class = tf.reshape(tf.constant([]), [bsz, -1, ncls])
@@ -76,7 +77,7 @@ def train_operation(X, Y_label, Y_bbox, Index, LR, config):
         # --------------------------- Main Stream -----------------------------
         [mainAnc_BM_x, mainAnc_BM_w, mainAnc_BM_labels, mainAnc_BM_scores,
          mainAnc_class, mainAnc_conf, mainAnc_rx, mainAnc_rw] = \
-            anchor_bboxes_encode(mainAnc, Y_label, Y_bbox, Index, config, ln)
+            anchor_bboxes_encode(mainAnc, Y_label, Y_bbox, Index, config, ln, N_lsit[i])
 
         mainAnc_xmin = mainAnc_rx - mainAnc_rw / 2
         mainAnc_xmax = mainAnc_rx + mainAnc_rw / 2
@@ -187,7 +188,8 @@ def test_operation(X, config):
     ncls = config.num_classes
 
     net = base_feature_network(X)
-    MALs = main_anchor_layer(net)
+    # MALs = main_anchor_layer(net)
+    MALs, N_lsit = mx_fuse_anchor_layer(net, config)
 
     full_mainAnc_class = tf.reshape(tf.constant([]), [bsz, -1, ncls])
     full_mainAnc_conf = tf.reshape(tf.constant([]), [bsz, -1])
@@ -197,7 +199,7 @@ def test_operation(X, config):
     for i, ln in enumerate(config.layers_name):
         mainAnc = mulClsReg_predict_layer(config, MALs[i], ln, 'mainStream')
 
-        mainAnc_class, mainAnc_conf, mainAnc_rx, mainAnc_rw = anchor_box_adjust(mainAnc, config, ln)
+        mainAnc_class, mainAnc_conf, mainAnc_rx, mainAnc_rw = anchor_box_adjust(mainAnc, config, ln, N_lsit[i])
 
         mainAnc_xmin = mainAnc_rx - mainAnc_rw / 2
         mainAnc_xmax = mainAnc_rx + mainAnc_rw / 2

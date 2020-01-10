@@ -25,12 +25,13 @@ class Config(object):
         self.train_split_set = 'val'
         self.test_split_set = 'test'
         self.window_size = 512
-        self.batch_size = 48
+        self.batch_size = 1 #48
         self.input_steps = 128
         self.num_classes = 21
         self.class_real = [7, 9, 12, 21, 22, 23, 24, 26, 31, 33,
                            36, 40, 45, 51, 68, 79, 85, 92, 93, 97]
-        self.layers_name = ['AL1', 'AL2', 'AL3']
+        self.fuse_anchor_layers_name = ['Fuse1']
+        self.layers_name = ['AL1'] # ['AL1', 'AL2', 'AL3']
         self.scale = {'AL1': 1. / 16, 'AL2': 1. / 8, 'AL3': 1. / 4}
         self.num_anchors = {'AL1': 16, 'AL2': 8, 'AL3': 4}
         self.aspect_ratios = {'AL1': [0.5, 0.75, 1, 1.5, 2],
@@ -53,6 +54,8 @@ class Config(object):
         self.filter_conf_threshold = 0.1
         # used in load_data.py window_data function to choose window
         self.overlap_ratio_threshold = 0.9
+
+        self.fuse_threshold=0.5
 
         self.save_predict_result = True
         self.initialize = True

@@ -19,7 +19,7 @@ import numpy
 import os, time
 import tensorflow as tf
 from os.path import join
-
+import mx_utils
 
 #################################### TRAIN & TEST #####################################
 
@@ -169,8 +169,102 @@ def default_box(layer_steps, scale, a_ratios):
     center_default = np.array(center_default)
     return width_default, center_default
 
+def mx_default_box(layer_steps, a_ratios):
+    """
 
-def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
+    :param layer_steps: num_neure at each anchor layer
+    """
+    layer_steps = tf.cast(layer_steps, tf.float32)
+    layer_steps = tf.reshape(layer_steps, [1])
+    a_ratios = tf.constant(np.array(a_ratios))
+
+    def pyc_default_box(layer_steps, a_ratios):
+        layer_steps = int(layer_steps.tolist()[0])
+        # print(layer_steps.shape)
+        scale = 1.0 / layer_steps
+        width_set = [scale * ratio for ratio in a_ratios]
+        center_set = [1. / layer_steps * i + 0.5 / layer_steps for i in range(layer_steps)]
+
+        width_default = []
+        center_default = []
+        for i in range(layer_steps):
+            for j in range(len(a_ratios)):
+                width_default.append(width_set[j])
+                center_default.append(center_set[i])
+        width_default = np.array(width_default)
+        center_default = np.array(center_default)
+        width_default = width_default.astype(np.float32)
+        center_default = center_default.astype(np.float32)
+        return width_default, center_default
+
+    width_default, center_default = tf.py_func(pyc_default_box, [layer_steps, a_ratios], [tf.float32, tf.float32])
+
+    return width_default, center_default
+
+def mx_fuse_anchor_box(prop_width, fuse_threshold=0.5):
+    """
+    :param prop_width: shape=[bs, num_neure, 1]
+    :param fuse_threshold:
+    """
+    with_set = tf.reshape(prop_width, shape=[-1, 1])
+    num_neure = prop_width.get_shape().as_list()[1]
+    center_set = tf.cast(tf.range(num_neure), tf.float32) + tf.constant([0.5])
+    center_set = tf.reshape(center_set, shape=[-1,1])
+
+    start = center_set - with_set / 2
+    end = center_set + with_set / 2
+    start_end = tf.concat((start, end), axis=-1)
+    start_end = tf.clip_by_value(start_end, 0, num_neure)
+
+    def mx_FuseAnchor(start_end, fuse_threshold):
+        """
+
+        :param start_end:
+        :param fuse_threshold:
+        """
+        anchor = start_end.tolist()
+        fuse_idx = []
+        for idx in range(1, len(anchor) - 1):
+            span_t_last = anchor[idx - 1]
+            span_t = anchor[idx]
+            span_t_next = anchor[idx + 1]
+            iou1 = mx_utils.temporal_iou(span_t_last, span_t)
+            iou2 = mx_utils.temporal_iou(span_t_next, span_t)
+
+            if max(iou1, iou2) > fuse_threshold:
+                if iou1 < iou2:
+                    start = min(span_t_next[0], span_t[0])
+                    end = max(span_t_next[1], span_t[1])
+                    fuse_idx.append([idx, idx + 1])
+                else:
+                    start = min(span_t_last[0], span_t[0])
+                    end = max(span_t_last[1], span_t[1])
+                    fuse_idx.append([idx - 1, idx])
+
+        # 去除重复的
+        fuse_idx_clean = []
+        for r in fuse_idx:
+            if not r in fuse_idx_clean:
+                fuse_idx_clean.append(r)
+
+        # get fuse proposal
+        fuse_proposal_clean = []
+        for f_i in fuse_idx_clean:
+            span_t_last = anchor[f_i[0]]
+            span_t = anchor[f_i[1]]
+            start = min(span_t_last[0], span_t[0])
+            end = max(span_t_last[1], span_t[1])
+            fuse_proposal_clean.append([start, end])
+
+        final_fuse = mx_utils.mx_GetFuseAndUnfuseIdx(fuse_idx_clean, anchor)
+        num_anchors = final_fuse.shape[0]
+        return final_fuse, num_anchors
+
+    [final_fuse, num_anchors] = tf.py_func(mx_FuseAnchor, [start_end, fuse_threshold], [tf.int32, tf.int64])
+    num_anchors = tf.cast(num_anchors, tf.int32)
+    return final_fuse, num_anchors
+
+def anchor_box_adjust(anchors, config, layer_name, N, pre_rx=None, pre_rw=None):
     """
     Introduction:
     @param anchors: output of anchor layer ----> shape=[bs, totoal anchors, classes + 3]  3: overlap, d_c, d_w
@@ -188,8 +282,9 @@ def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
         # generate anchors
         # dboxes_w: width of an anchors (note: use scale)
         # dboxes_x: centers of an anchors (note: use scale)
-        dboxes_w, dboxes_x = default_box(config.num_anchors[layer_name],
-                                         config.scale[layer_name], config.aspect_ratios[layer_name])
+        # dboxes_w, dboxes_x = default_box(config.num_anchors[layer_name],
+        #                                  config.scale[layer_name], config.aspect_ratios[layer_name])
+        dboxes_w, dboxes_x = mx_default_box(N, config.aspect_ratios[layer_name])
     else:
         dboxes_x = pre_rx
         dboxes_w = pre_rw
@@ -214,7 +309,7 @@ def anchor_box_adjust(anchors, config, layer_name, pre_rx=None, pre_rw=None):
 # each adjusted anchors after predicting one by one
 # the matched ground truth may be positive/negative,
 # the matched x,w,labels,scores all corresponding to this anchor
-def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, pre_rx=None, pre_rw=None):
+def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, N, pre_rx=None, pre_rw=None):
     '''
     :param anchors: output of the network ----> shape=[bs, totoal anchors, classes + 3]  3: overlap, d_c, d_w
     :param glabels: ground truth classes ----> shape=[None, num_classes]
@@ -243,22 +338,22 @@ def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, p
     # anchors_rx: center, not offset center ----> shape=[bs, totoal_anchors]
     # anchors_rw: width, not offset width ----> shape=[bs, totoal_anchors]
     anchors_class, anchors_conf, anchors_rx, anchors_rw = \
-        anchor_box_adjust(anchors, config, layer_name, pre_rx, pre_rw)
+        anchor_box_adjust(anchors, config, layer_name, N, pre_rx, pre_rw)
 
-    batch_match_x = tf.reshape(tf.constant([]), [-1, num_anchors * num_dbox])
-    batch_match_w = tf.reshape(tf.constant([]), [-1, num_anchors * num_dbox])
-    batch_match_scores = tf.reshape(tf.constant([]), [-1, num_anchors * num_dbox])
+    batch_match_x = tf.reshape(tf.constant([]), [-1, N * num_dbox])
+    batch_match_w = tf.reshape(tf.constant([]), [-1, N * num_dbox])
+    batch_match_scores = tf.reshape(tf.constant([]), [-1, N * num_dbox])
     batch_match_labels = tf.reshape(tf.constant([], dtype=tf.int32),
-                                    [-1, num_anchors * num_dbox, num_classes])
+                                    [-1, N * num_dbox, num_classes])
 
     for i in range(config.batch_size):
-        shape = (num_anchors * num_dbox)
+        shape = (N * num_dbox)
         match_x = tf.zeros(shape, dtype)
         match_w = tf.zeros(shape, dtype)
         match_scores = tf.zeros(shape, dtype)
 
-        match_labels_other = tf.ones((num_anchors * num_dbox, 1), dtype=tf.int32)
-        match_labels_class = tf.zeros((num_anchors * num_dbox, num_classes - 1), dtype=tf.int32)
+        match_labels_other = tf.ones((N * num_dbox, 1), dtype=tf.int32)
+        match_labels_class = tf.zeros((N * num_dbox, num_classes - 1), dtype=tf.int32)
         match_labels = tf.concat([match_labels_other, match_labels_class], axis=-1) # shape=[total_anchors, num_classes]
 
         b_anchors_rx = anchors_rx[i] # shape=[num_anchors * num_dbox]
@@ -275,16 +370,16 @@ def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, p
                            b_glabels, b_gbboxes,
                            match_x, match_w, match_labels, match_scores])
 
-        match_x = tf.reshape(match_x, [-1, num_anchors * num_dbox])
+        match_x = tf.reshape(match_x, [-1, N * num_dbox])
         batch_match_x = tf.concat([batch_match_x, match_x], axis=0)
 
-        match_w = tf.reshape(match_w, [-1, num_anchors * num_dbox])
+        match_w = tf.reshape(match_w, [-1, N * num_dbox])
         batch_match_w = tf.concat([batch_match_w, match_w], axis=0)
 
-        match_scores = tf.reshape(match_scores, [-1, num_anchors * num_dbox])
+        match_scores = tf.reshape(match_scores, [-1, N * num_dbox])
         batch_match_scores = tf.concat([batch_match_scores, match_scores], axis=0)
 
-        match_labels = tf.reshape(match_labels, [-1, num_anchors * num_dbox, num_classes])
+        match_labels = tf.reshape(match_labels, [-1, N * num_dbox, num_classes])
         batch_match_labels = tf.concat([batch_match_labels, match_labels], axis=0)
 
     return [batch_match_x, batch_match_w, batch_match_labels, batch_match_scores,
@@ -359,6 +454,48 @@ def main_anchor_layer(net, mode=''):
 
     return MAL1, MAL2, MAL3
 
+
+def mx_fuse_anchor_layer(net, config, mode=''):
+    """
+
+    :param net: shape=[batch_size, num_neure, 512]
+    :param mode:
+    :return:
+    """
+    # main network
+    initer = tf.contrib.layers.xavier_initializer(seed=5)
+
+    feat_dim = net.get_shape().as_list()[-1]
+    num_neure = net.get_shape().as_list()[1]
+    MAL_list = []
+    N_lsit = []
+    for i, fuse_layer_name in enumerate(config.fuse_anchor_layers_name):
+        with tf.variable_scope("main_anchor_layer_" + fuse_layer_name):
+
+            width_increment = tf.layers.conv1d(inputs=net, filters=1, kernel_size=3, strides=1, padding='same',
+                                    activation=tf.nn.relu, kernel_initializer=initer)  # [bs, num_neure, 1]
+
+            prop_width = tf.ones_like(width_increment, dtype=tf.float32)
+            prop_width_update = prop_width + width_increment
+            final_fuse, N = mx_fuse_anchor_box(prop_width_update, fuse_threshold=config.fuse_threshold)
+            # final_fuse = tf.reshape(final_fuse, [-1,2])
+            final_fuse = final_fuse / num_neure
+
+            ymin = tf.cast(final_fuse[:, 0:1], tf.float32)
+            xmin = tf.zeros_like(ymin, dtype=tf.float32)
+            ymax = tf.cast(final_fuse[:, 1:2], tf.float32)
+            xmax = tf.zeros_like(ymax, dtype=tf.float32)
+
+            boxes = tf.concat((ymin, xmin, ymax, xmax), axis=-1)
+            # N = boxes.get_shape().as_list()[0]
+
+            net = tf.expand_dims(net, 2)
+            MAL = tf.image.crop_and_resize(net, boxes, box_ind=tf.zeros(shape=[N, ], dtype=tf.int32),
+                                           crop_size=[1, 1], name='CROP_AND_RESIZE')
+            net = tf.reshape(MAL, [config.batch_size, -1, feat_dim])
+            MAL_list.append(net)
+            N_lsit.append(N)
+    return MAL_list, N_lsit
 
 def branch_anchor_layer(MALs, name=''):
     MAL1, MAL2, MAL3 = MALs
@@ -666,18 +803,22 @@ def final_result_process(stage, pretrain_dataset, config, mode, method, method_t
         result_file = join('results', 'result_fuse_' + pretrain_dataset + '_' + method + '.txt')
     else:
         result_file = join('results', 'result_' + mode + '_' + pretrain_dataset + '_' + method + '.txt')
+        print('test or train')
 
     # necessary, otherwise the new content will append to the old
     if os.path.isfile(result_file):
         os.remove(result_file)
     df = df[df.score_0 < config.filter_neg_threshold]
+    print('df_score:\n', df.score_0)
     # it seems that without the following line,
     # the performance would be a little better
     df = df[df.conf > config.filter_conf_threshold]
+    print('df:_conf:\n', df.conf)
     video_name_list = list(set(df.video_name.values[:]))
     # print "len(video_name_list):", len(video_name_list) # 210
-
+    print('video_name_list:', video_name_list)
     for video_name in video_name_list:
+        print('video_name:', video_name)
         tmpdf = df[df.video_name == video_name]
         tmpdf = post_process(tmpdf, config)
 
