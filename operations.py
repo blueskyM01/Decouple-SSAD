@@ -476,7 +476,6 @@ def mx_fuse_anchor_layer(net, config, mode=''):
     initer = tf.contrib.layers.xavier_initializer(seed=5)
 
     feat_dim = net.get_shape().as_list()[-1]
-    num_neure = net.get_shape().as_list()[1]
     MAL_list = []
     N_lsit = []
     for i, fuse_layer_name in enumerate(config.fuse_anchor_layers_name):
@@ -489,7 +488,7 @@ def mx_fuse_anchor_layer(net, config, mode=''):
             prop_width_update = prop_width + width_increment
             final_fuse, N = mx_fuse_anchor_box(prop_width_update, fuse_threshold=config.fuse_threshold)
             # final_fuse = tf.reshape(final_fuse, [-1,2])
-            final_fuse = final_fuse / num_neure # 归一化处理，下面的tf.image.crop_and_resize需要
+            final_fuse = final_fuse / N # 归一化处理，下面的tf.image.crop_and_resize需要
 
             ymin = tf.cast(final_fuse[:, 0:1], tf.float32)
             xmin = tf.zeros_like(ymin, dtype=tf.float32)
