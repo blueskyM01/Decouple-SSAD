@@ -31,7 +31,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 # method = sys.argv[4]
 # method_temporal = sys.argv[5]  # used for final result fusing
 
-stage = 'test'  # train/test/fuse/train_test_fuse
+stage = 'train_test_fuse'  # train/test/fuse/train_test_fuse
 pretrain_dataset = 'UCF101'  # UCF101/KnetV3
 mode = 'temporal'  # temporal/spatial
 method = 'main_stream'
@@ -169,15 +169,15 @@ def train_main(config):
             [merged_] = sess.run([merged], feed_dict=feed_dict)
             writer.add_summary(merged_, counter)
 
-            print('[Epoch/Idx][%2d/%3d] totoal_loss: %2.4f, main_class_loss: %2.4f, '
-                  'main_loc_loss: %2.4f, main_conf_loss: %2.4f' % (epoch, idx, out_loss, out_main_class_loss,
+            print('[Epoch/Idx][%2d/%3d] totoal_loss: %2.6f, main_class_loss: %2.6f, '
+                  'main_loc_loss: %2.10f, main_conf_loss: %2.6f' % (epoch, idx, out_loss, out_main_class_loss,
                                                                    out_main_loc_loss, out_main_conf_loss))
 
             loss_info.append(out_loss)
 
         print ("Training epoch ", epoch, " loss: ", np.mean(loss_info))
 
-        if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1:
+        if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch == 5 or epoch == 10:
             model_saver.save(sess, models_file_prefix, global_step=epoch)
 
 

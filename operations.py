@@ -207,13 +207,15 @@ def mx_fuse_anchor_box(prop_width, fuse_threshold=0.5):
     :param fuse_threshold:
     """
     with_set = tf.reshape(prop_width, shape=[-1, 1])
-    num_neure = prop_width.get_shape().as_list()[1]
+    # num_neure = prop_width.get_shape().as_list()[1]
+    num_neure = tf.shape(prop_width)[1]
     center_set = tf.cast(tf.range(num_neure), tf.float32) + tf.constant([0.5])
     center_set = tf.reshape(center_set, shape=[-1,1])
 
     start = center_set - with_set / 2
     end = center_set + with_set / 2
     start_end = tf.concat((start, end), axis=-1)
+    num_neure = tf.cast(num_neure, tf.float32)
     start_end = tf.clip_by_value(start_end, 0, num_neure)
 
     def mx_FuseAnchor(start_end, fuse_threshold):
@@ -404,14 +406,15 @@ def out_conv(layer, initer=tf.contrib.layers.xavier_initializer(seed=5)):
 ############################ TRAIN and TEST NETWORK LAYER ###############################
 
 def get_trainable_variables():
-    trainable_variables_scope = [a.name for a in tf.trainable_variables()]
-    trainable_variables_list = tf.trainable_variables()
-    trainable_variables = []
-    for i in range(len(trainable_variables_scope)):
-        if ("base_feature_network" in trainable_variables_scope[i]) or \
-                ("anchor_layer" in trainable_variables_scope[i]) or \
-                ("predict_layer" in trainable_variables_scope[i]):
-            trainable_variables.append(trainable_variables_list[i])
+    # trainable_variables_scope = [a.name for a in tf.trainable_variables()]
+    # trainable_variables_list = tf.trainable_variables()
+    # trainable_variables = []
+    # for i in range(len(trainable_variables_scope)):
+    #     if ("base_feature_network" in trainable_variables_scope[i]) or \
+    #             ("anchor_layer" in trainable_variables_scope[i]) or \
+    #             ("predict_layer" in trainable_variables_scope[i]):
+    #         trainable_variables.append(trainable_variables_list[i])
+    trainable_variables = tf.trainable_variables()
     return trainable_variables
 
 
@@ -431,6 +434,13 @@ def base_feature_network(X, mode=''):
         # [batch_size, 64, 512]
         net = tf.layers.max_pooling1d(inputs=net, pool_size=4, strides=2, padding='same')
         # [batch_size, 32, 512]
+
+        net = tf.layers.conv1d(inputs=net, filters=512, kernel_size=9, strides=1, padding='same',
+                               activation=tf.nn.relu, kernel_initializer=initer)
+        # [batch_size, 32, 512]
+        net = tf.layers.max_pooling1d(inputs=net, pool_size=4, strides=2, padding='same')
+        # [batch_size, 16, 512]
+
     return net
 
 
@@ -479,7 +489,7 @@ def mx_fuse_anchor_layer(net, config, mode=''):
             prop_width_update = prop_width + width_increment
             final_fuse, N = mx_fuse_anchor_box(prop_width_update, fuse_threshold=config.fuse_threshold)
             # final_fuse = tf.reshape(final_fuse, [-1,2])
-            final_fuse = final_fuse / num_neure
+            final_fuse = final_fuse / num_neure # 归一化处理，下面的tf.image.crop_and_resize需要
 
             ymin = tf.cast(final_fuse[:, 0:1], tf.float32)
             xmin = tf.zeros_like(ymin, dtype=tf.float32)
@@ -808,15 +818,18 @@ def final_result_process(stage, pretrain_dataset, config, mode, method, method_t
     # necessary, otherwise the new content will append to the old
     if os.path.isfile(result_file):
         os.remove(result_file)
-    df = df[df.score_0 < config.filter_neg_threshold]
+
     print('df_score:\n', df.score_0)
+    print('df:_conf:\n', df.conf)
+
+    df = df[df.score_0 < config.filter_neg_threshold]
     # it seems that without the following line,
     # the performance would be a little better
     df = df[df.conf > config.filter_conf_threshold]
-    print('df:_conf:\n', df.conf)
     video_name_list = list(set(df.video_name.values[:]))
     # print "len(video_name_list):", len(video_name_list) # 210
     print('video_name_list:', video_name_list)
+
     for video_name in video_name_list:
         print('video_name:', video_name)
         tmpdf = df[df.video_name == video_name]

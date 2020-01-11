@@ -30,8 +30,8 @@ class Config(object):
         self.num_classes = 21
         self.class_real = [7, 9, 12, 21, 22, 23, 24, 26, 31, 33,
                            36, 40, 45, 51, 68, 79, 85, 92, 93, 97]
-        self.fuse_anchor_layers_name = ['Fuse1']
-        self.layers_name = ['AL1'] # ['AL1', 'AL2', 'AL3']
+        self.fuse_anchor_layers_name = ['Fuse1', 'Fuse2', 'Fuse3']
+        self.layers_name = ['AL1', 'AL2', 'AL3'] # ['AL1', 'AL2', 'AL3']
         self.scale = {'AL1': 1. / 16, 'AL2': 1. / 8, 'AL3': 1. / 4}
         self.num_anchors = {'AL1': 16, 'AL2': 8, 'AL3': 4}
         self.aspect_ratios = {'AL1': [0.5, 0.75, 1, 1.5, 2],
@@ -42,7 +42,7 @@ class Config(object):
         self.training_epochs = 31
         self.learning_rates = [0.0001] * 30 + [0.00001]  # the 31th epoch is crucial
         self.p_class = 1
-        self.p_loc = 10
+        self.p_loc = 100
         self.p_conf = 10
         self.negative_ratio = 1
         self.seed = 1129
