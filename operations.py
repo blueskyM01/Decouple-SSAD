@@ -329,7 +329,7 @@ def anchor_bboxes_encode(anchors, glabels, gbboxes, Index, config, layer_name, N
             anchors_rx: outpyt of the anchor layer: center, not offset center ----> shape=[bs, totoal_anchors]
             anchors_rw: outpyt of the anchor layer: width, not offset width ----> shape=[bs, totoal_anchors]
     '''
-    num_anchors = config.num_anchors[layer_name]
+    # num_anchors = config.num_anchors[layer_name]
     num_dbox = config.num_dbox[layer_name]
     # num_classes = config.num_classes
     num_classes = anchors.get_shape().as_list()[-1] - 3

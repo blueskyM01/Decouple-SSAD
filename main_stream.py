@@ -46,7 +46,7 @@ else:
 
 models_dir = get_models_dir(mode, pretrain_dataset, method)
 models_file_prefix = join(models_dir, 'model-ep')
-test_checkpoint_file = join(models_dir, 'model-ep-30')
+test_checkpoint_file = join(models_dir, 'model-ep-10')
 predict_file = get_predict_result_path(mode, pretrain_dataset, method)
 
 
@@ -177,7 +177,8 @@ def train_main(config):
 
         print ("Training epoch ", epoch, " loss: ", np.mean(loss_info))
 
-        if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch == 5 or epoch == 10:
+        # if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch == 5 or epoch == 10:
+        if epoch == 5 or epoch == 10:
             model_saver.save(sess, models_file_prefix, global_step=epoch)
 
 
