@@ -42,11 +42,12 @@ class Config(object):
                               'AL6': [0.5, 0.75, 1, 1.5, 2]}
         self.num_dbox = {'AL1': 5, 'AL2': 5, 'AL3': 5, 'AL4': 5, 'AL5': 5, 'AL6': 5}
 
-        self.training_epochs = 11 #31
-        self.learning_rates = [0.0001] * 10 + [0.00001]  # the 31th epoch is crucial
+        self.training_epochs = 21 #31
+        self.learning_rates = [0.0001] * 20 + [0.00001]  # the 31th epoch is crucial
         self.p_class = 1
         self.p_loc = 100
         self.p_conf = 10
+        self.p_fuse = 0.1
         self.negative_ratio = 1
         self.seed = 1129
 

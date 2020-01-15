@@ -10,8 +10,11 @@ def temporal_iou(span_A, span_B):
     """
     union = min(span_A[0], span_B[0]), max(span_A[1], span_B[1])
     inter = max(span_A[0], span_B[0]), min(span_A[1], span_B[1])
-
+    w_A = span_A[1] - span_A[0]
+    w_B = span_B[1] - span_B[0]
     if inter[0] >= inter[1]:
+        return 0
+    elif w_A == 0 or w_B == 0:
         return 0
     else:
         return float(inter[1] - inter[0]) / float(union[1] - union[0])

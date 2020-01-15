@@ -77,7 +77,10 @@ import mx_utils
 #     a = sess.run(final_fuse)
 #     print(a)
 
-fuse_anchor_layers_name = ['Fuse1', 'Fuse2']
-print(fuse_anchor_layers_name)
-for i, fuse_layer_name in enumerate(fuse_anchor_layers_name):
-    print(i, fuse_layer_name)
+a = np.array([[1,2],
+              [3,4],
+              [5,6]])
+
+b = np.array([0,2])
+c = np.array([1,1])
+print(a[b, c])

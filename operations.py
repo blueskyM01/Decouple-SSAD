@@ -203,26 +203,17 @@ def mx_default_box(layer_steps, a_ratios):
 
 def mx_fuse_anchor_box(prop_width, fuse_threshold=0.5):
     """
-    :param prop_width: shape=[bs, num_neure, 1]
+    :param prop_width: start_end, shape=[num_neure, 2]
     :param fuse_threshold:
     """
-    with_set = tf.reshape(prop_width, shape=[-1, 1])
-    # num_neure = prop_width.get_shape().as_list()[1]
-    num_neure = tf.shape(prop_width)[1]
-    center_set = tf.cast(tf.range(num_neure), tf.float32) + tf.constant([0.5])
-    center_set = tf.reshape(center_set, shape=[-1,1])
 
-    start = center_set - with_set / 2
-    end = center_set + with_set / 2
-    start_end = tf.concat((start, end), axis=-1)
-    num_neure = tf.cast(num_neure, tf.float32)
-    start_end = tf.clip_by_value(start_end, 0, num_neure)
+    start_end = tf.clip_by_value(prop_width, 0, 1e8)
 
     def mx_FuseAnchor(start_end, fuse_threshold):
         """
 
-        :param start_end:
-        :param fuse_threshold:
+        :param start_end: shape=[num_neure, 2]
+        :param fuse_threshold: int
         """
         anchor = start_end.tolist()
         fuse_idx = []
@@ -435,11 +426,11 @@ def base_feature_network(X, mode=''):
         net = tf.layers.max_pooling1d(inputs=net, pool_size=4, strides=2, padding='same')
         # [batch_size, 32, 512]
 
-        net = tf.layers.conv1d(inputs=net, filters=512, kernel_size=9, strides=1, padding='same',
-                               activation=tf.nn.relu, kernel_initializer=initer)
-        # [batch_size, 32, 512]
-        net = tf.layers.max_pooling1d(inputs=net, pool_size=4, strides=2, padding='same')
-        # [batch_size, 16, 512]
+        # net = tf.layers.conv1d(inputs=net, filters=512, kernel_size=9, strides=1, padding='same',
+        #                        activation=tf.nn.relu, kernel_initializer=initer)
+        # # [batch_size, 32, 512]
+        # net = tf.layers.max_pooling1d(inputs=net, pool_size=4, strides=2, padding='same')
+        # # [batch_size, 16, 512]
 
     return net
 
@@ -478,15 +469,19 @@ def mx_fuse_anchor_layer(net, config, mode=''):
     feat_dim = net.get_shape().as_list()[-1]
     MAL_list = []
     N_lsit = []
+    width_list = []
     for i, fuse_layer_name in enumerate(config.fuse_anchor_layers_name):
         with tf.variable_scope("main_anchor_layer_" + fuse_layer_name):
 
-            width_increment = tf.layers.conv1d(inputs=net, filters=1, kernel_size=3, strides=1, padding='same',
-                                    activation=tf.nn.relu, kernel_initializer=initer)  # [bs, num_neure, 1]
+            net = tf.layers.conv1d(inputs=net, filters=512, kernel_size=3, strides=1, padding='same',
+                                    activation=tf.nn.relu, kernel_initializer=initer)  # [bs, num_neure, 512]
 
-            prop_width = tf.ones_like(width_increment, dtype=tf.float32)
-            prop_width_update = prop_width + width_increment
-            final_fuse, N = mx_fuse_anchor_box(prop_width_update, fuse_threshold=config.fuse_threshold)
+            width = tf.layers.conv1d(inputs=net, filters=2, kernel_size=3, strides=1, padding='same',
+                                               activation=None, kernel_initializer=initer)  # [bs, num_neure, 2]
+            prop_width = tf.reshape(width, [-1, 2])
+            prop_width = decode_box(prop_width)
+
+            final_fuse, N = mx_fuse_anchor_box(prop_width, fuse_threshold=config.fuse_threshold)
             # final_fuse = tf.reshape(final_fuse, [-1,2])
             final_fuse = final_fuse / N # 归一化处理，下面的tf.image.crop_and_resize需要
 
@@ -504,7 +499,8 @@ def mx_fuse_anchor_layer(net, config, mode=''):
             net = tf.reshape(MAL, [config.batch_size, -1, feat_dim])
             MAL_list.append(net)
             N_lsit.append(N)
-    return MAL_list, N_lsit
+            width_list.append(width)
+    return MAL_list, N_lsit, width_list
 
 def branch_anchor_layer(MALs, name=''):
     MAL1, MAL2, MAL3 = MALs
@@ -841,3 +837,58 @@ def final_result_process(stage, pretrain_dataset, config, mode, method, method_t
         tmpdf = pd.concat([tmpdf, diving_df])
 
         temporal_nms(config, tmpdf, result_file, video_name)
+
+
+
+def mx_width_label(num_neure, start_end):
+    """
+    Introduction:
+    @param num_neure:
+    @param start_end: shape=[-1, 2]
+    @return: Y shape=[num_neure, 2]
+    """
+    feat = tf.zeros(shape=[num_neure, 2], dtype=tf.float32)
+    center = (start_end[:, 1:2] + start_end[:, 0:1]) / 2.0
+    width = start_end[:, 1:2] - start_end[:, 0:1]
+
+    num_nerue = tf.shape(feat)[0]
+    interval = 1 / tf.cast(num_nerue, tf.float32)
+    norm_center = center / interval
+    norm_width = width / interval
+
+    def mx_get_label(feat, norm_center, norm_width):
+        idx_grid = norm_center.astype(np.int32)
+        norm_center = norm_center - idx_grid
+        idx_grid = np.reshape(idx_grid, [-1])
+        feat[idx_grid] = np.concatenate((norm_center, norm_width), axis=-1)
+        return feat
+
+    [Y] = tf.py_func(mx_get_label, [feat, norm_center, norm_width], [tf.float32])
+    return Y
+
+def decode_box(output):
+    """
+
+    @param output: shape=[-1,2]
+    @return: start_end
+    """
+    num_nerue = tf.shape(output)[0]
+    idx_grid = tf.cast(tf.range(num_nerue) , tf.float32)
+    idx_grid = tf.reshape(idx_grid, [-1,1])
+    interval = 1 / tf.cast(num_nerue, tf.float32)
+
+    norm_center = output[:, 0:1]
+    norm_width = output[:, 1:2]
+
+    center = interval * (idx_grid + norm_center)
+    width = norm_width * interval
+
+    start = center - width / 2.0
+    end = center + width / 2.0
+
+    start_end = tf.concat((start, end), axis=-1)
+    start_end_mask = tf.zeros_like(start_end)
+
+    start_end = tf.where(output > 0, start_end, start_end_mask)
+
+    return start_end

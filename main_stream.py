@@ -31,7 +31,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 # method = sys.argv[4]
 # method_temporal = sys.argv[5]  # used for final result fusing
 
-stage = 'train_test_fuse'  # train/test/fuse/train_test_fuse
+stage = 'test'  # train/test/fuse/train_test_fuse
 pretrain_dataset = 'UCF101'  # UCF101/KnetV3
 mode = 'temporal'  # temporal/spatial
 method = 'main_stream'
@@ -58,21 +58,31 @@ def train_operation(X, Y_label, Y_bbox, Index, LR, config):
 
     net = base_feature_network(X)
     # MALs = main_anchor_layer(net)
-    MALs, N_lsit = mx_fuse_anchor_layer(net, config)
+    MALs, N_lsit, width_list = mx_fuse_anchor_layer(net, config)
 
     # --------------------------- Main Stream -----------------------------
     full_mainAnc_class = tf.reshape(tf.constant([]), [bsz, -1, ncls])
     full_mainAnc_conf = tf.reshape(tf.constant([]), [bsz, -1])
     full_mainAnc_xmin = tf.reshape(tf.constant([]), [bsz, -1])
     full_mainAnc_xmax = tf.reshape(tf.constant([]), [bsz, -1])
+    full_mainAnc_width = tf.reshape(tf.constant([]), [-1, 2])
 
     full_mainAnc_BM_x = tf.reshape(tf.constant([]), [bsz, -1])
     full_mainAnc_BM_w = tf.reshape(tf.constant([]), [bsz, -1])
     full_mainAnc_BM_labels = tf.reshape(tf.constant([], dtype=tf.int32), [bsz, -1, ncls])
     full_mainAnc_BM_scores = tf.reshape(tf.constant([]), [bsz, -1])
+    full_mainAnc_BM_width = tf.reshape(tf.constant([]), [-1, 2])
+
 
     for i, ln in enumerate(config.layers_name):
         mainAnc = mulClsReg_predict_layer(config, MALs[i], ln, 'mainStream')
+
+        # --------------------------- Fuse Loss -----------------------------
+        width = width_list[i]
+        width = tf.reshape(width, [-1, 2])
+        num_neure = tf.shape(width)[0]
+        start_end = Y_bbox[:, 0:2]
+        Y_Fuse_label = mx_width_label(num_neure, start_end)
 
         # --------------------------- Main Stream -----------------------------
         [mainAnc_BM_x, mainAnc_BM_w, mainAnc_BM_labels, mainAnc_BM_scores,
@@ -86,29 +96,32 @@ def train_operation(X, Y_label, Y_bbox, Index, LR, config):
         full_mainAnc_conf = tf.concat([full_mainAnc_conf, mainAnc_conf], axis=1)
         full_mainAnc_xmin = tf.concat([full_mainAnc_xmin, mainAnc_xmin], axis=1)
         full_mainAnc_xmax = tf.concat([full_mainAnc_xmax, mainAnc_xmax], axis=1)
+        full_mainAnc_width = tf.concat([full_mainAnc_width, width], axis=0)
 
         full_mainAnc_BM_x = tf.concat([full_mainAnc_BM_x, mainAnc_BM_x], axis=1)
         full_mainAnc_BM_w = tf.concat([full_mainAnc_BM_w, mainAnc_BM_w], axis=1)
         full_mainAnc_BM_labels = tf.concat([full_mainAnc_BM_labels, mainAnc_BM_labels], axis=1)
         full_mainAnc_BM_scores = tf.concat([full_mainAnc_BM_scores, mainAnc_BM_scores], axis=1)
+        full_mainAnc_BM_width = tf.concat([full_mainAnc_BM_width, Y_Fuse_label], axis=0)
 
     main_class_loss, main_loc_loss, main_conf_loss = \
         loss_function(full_mainAnc_class, full_mainAnc_conf,
                       full_mainAnc_xmin, full_mainAnc_xmax,
                       full_mainAnc_BM_x, full_mainAnc_BM_w,
                       full_mainAnc_BM_labels, full_mainAnc_BM_scores, config)
-
-    loss = main_class_loss + config.p_loc * main_loc_loss + config.p_conf * main_conf_loss
+    main_fuse_loss = tf.reduce_mean(tf.square(full_mainAnc_width - full_mainAnc_BM_width))
+    loss = main_class_loss + config.p_loc * main_loc_loss + config.p_conf * main_conf_loss + config.p_fuse * main_fuse_loss
 
     tf.summary.scalar('total_loss', loss)
     tf.summary.scalar('main_class_loss', main_class_loss)
     tf.summary.scalar('main_loc_loss', main_loc_loss)
     tf.summary.scalar('main_conf_loss', main_conf_loss)
+    tf.summary.scalar('main_fuse_loss', main_fuse_loss)
 
     trainable_variables = get_trainable_variables()
     optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(loss, var_list=trainable_variables, global_step=global_step)
 
-    return optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss
+    return optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss, main_fuse_loss
 
 
 def train_main(config):
@@ -121,10 +134,10 @@ def train_main(config):
     Index = tf.placeholder(tf.int32, [bsz + 1])
     LR = tf.placeholder(tf.float32)
 
-    optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss = \
+    optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss, main_fuse_loss = \
         train_operation(X, Y_label, Y_bbox, Index, LR, config)
 
-    model_saver = tf.train.Saver(var_list=trainable_variables, max_to_keep=2)
+    model_saver = tf.train.Saver(var_list=trainable_variables, max_to_keep=5)
 
     sess = tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=False))
 
@@ -163,22 +176,25 @@ def train_main(config):
                          Index: batch_train_index[idx],
                          LR: config.learning_rates[epoch]}
             _, out_loss = sess.run([optimizer, loss], feed_dict=feed_dict)
-            out_main_class_loss, out_main_loc_loss, out_main_conf_loss, counter \
-                = sess.run([main_class_loss, main_loc_loss, main_conf_loss, global_step], feed_dict=feed_dict)
+            out_main_class_loss, out_main_loc_loss, out_main_conf_loss, out_main_fuse_loss, counter \
+                = sess.run([main_class_loss, main_loc_loss, main_conf_loss, main_fuse_loss, global_step], feed_dict=feed_dict)
 
             [merged_] = sess.run([merged], feed_dict=feed_dict)
             writer.add_summary(merged_, counter)
 
             print('[Epoch/Idx][%2d/%3d] totoal_loss: %2.6f, main_class_loss: %2.6f, '
-                  'main_loc_loss: %2.10f, main_conf_loss: %2.6f' % (epoch, idx, out_loss, out_main_class_loss,
-                                                                   out_main_loc_loss, out_main_conf_loss))
+                  'main_loc_loss: %2.10f, main_conf_loss: %2.6f, main_fuse_loss: %2.6f' % (epoch, idx, out_loss,
+                                                                                           out_main_class_loss,
+                                                                                           out_main_loc_loss,
+                                                                                           out_main_conf_loss,
+                                                                                           out_main_fuse_loss))
 
             loss_info.append(out_loss)
 
         print ("Training epoch ", epoch, " loss: ", np.mean(loss_info))
 
-        # if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch == 5 or epoch == 10:
-        if epoch == 5 or epoch == 10:
+        if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch == 5 or epoch == 10:
+        # if epoch == 5 or epoch == 10:
             model_saver.save(sess, models_file_prefix, global_step=epoch)
 
 
@@ -190,7 +206,7 @@ def test_operation(X, config):
 
     net = base_feature_network(X)
     # MALs = main_anchor_layer(net)
-    MALs, N_lsit = mx_fuse_anchor_layer(net, config)
+    MALs, N_lsit, width_list = mx_fuse_anchor_layer(net, config)
 
     full_mainAnc_class = tf.reshape(tf.constant([]), [bsz, -1, ncls])
     full_mainAnc_conf = tf.reshape(tf.constant([]), [bsz, -1])
