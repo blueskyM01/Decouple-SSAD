@@ -42,13 +42,13 @@ class Config(object):
                               'AL6': [0.5, 0.75, 1, 1.5, 2]}
         self.num_dbox = {'AL1': 5, 'AL2': 5, 'AL3': 5, 'AL4': 5, 'AL5': 5, 'AL6': 5}
 
-        self.training_epochs = 21 #31
-        self.learning_rates = [0.0001] * 20 + [0.00001]  # the 31th epoch is crucial
+        self.training_epochs = 31 #31
+        self.learning_rates = [0.0001] * 30 + [0.00001]  # the 31th epoch is crucial
         self.p_class = 1
-        self.p_loc = 100
+        self.p_loc = 500
         self.p_conf = 10
-        self.p_fuse = 0.1
-        self.negative_ratio = 1
+        self.p_fuse = 1
+        self.negative_ratio = 0.2
         self.seed = 1129
 
         self.nms_threshold = 0.2
@@ -86,9 +86,9 @@ def get_data_x_path(feature_path, split_set, mode, data_x_type):
     return join(feature_path, split_set, mode + 'DataX' + data_x_type)
 
 
-def get_models_dir(mode, pretrain_dataset, method):
-    return join('models', mode + '_' + pretrain_dataset + '_' + method)
+def get_models_dir(models_dir, mode, pretrain_dataset, method):
+    return join(models_dir, mode + '_' + pretrain_dataset + '_' + method)
 
 
-def get_predict_result_path(mode, pretrain_dataset, method):
-    return join('results', 'predict_' + mode + '_' + pretrain_dataset + '_' + method + '.csv')
+def get_predict_result_path(results_dir, mode, pretrain_dataset, method):
+    return join(results_dir, 'predict_' + mode + '_' + pretrain_dataset + '_' + method + '.csv')

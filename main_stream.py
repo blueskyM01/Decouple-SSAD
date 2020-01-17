@@ -22,32 +22,49 @@ from config import Config, get_models_dir, get_predict_result_path
 import time
 from os.path import join
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+import argparse
+
+# os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 ####################################### PARAMETERS ########################################
 
+
+parser = argparse.ArgumentParser()
+
+# -----------------------------m4_BE_GAN_network-----------------------------
+parser.add_argument("--stage", default='train_test_fuse', type=str, help="train/test/fuse/train_test_fuse")
+parser.add_argument("--pretrain_dataset", default='UCF101', type=str, help="UCF101/KnetV3")
+parser.add_argument("--mode", default='temporal', type=str, help="temporal/spatial")
+parser.add_argument("--method", default='main_stream', type=str, help="main_stream")
+parser.add_argument("--method_temporal", default='main_stream', type=str, help="main_stream")
+
+parser.add_argument("--log_dir", default='./logs/', type=str, help="temporal/spatial")
+parser.add_argument("--model_dir", default='./models/', type=str, help="main_stream")
+parser.add_argument("--results_dir", default='./results/', type=str, help="main_stream")
+
+cfg = parser.parse_args()
 # stage = sys.argv[1]  # train/test/fuse/train_test_fuse
 # pretrain_dataset = sys.argv[2]  # UCF101/KnetV3
 # mode = sys.argv[3]  # temporal/spatial
 # method = sys.argv[4]
 # method_temporal = sys.argv[5]  # used for final result fusing
 
-stage = 'test'  # train/test/fuse/train_test_fuse
-pretrain_dataset = 'UCF101'  # UCF101/KnetV3
-mode = 'temporal'  # temporal/spatial
-method = 'main_stream'
-method_temporal = 'main_stream'  # used for final result fusing
+# stage = 'train_test_fuse'  # train/test/fuse/train_test_fuse
+# pretrain_dataset = 'UCF101'  # UCF101/KnetV3
+# mode = 'temporal'  # temporal/spatial
+# method = 'main_stream'
+# method_temporal = 'main_stream'  # used for final result fusing
 
 global_step = tf.Variable(0, name='global_step', trainable=False)
 
-if (mode == 'spatial' and pretrain_dataset == 'Anet') or pretrain_dataset == 'KnetV3':
+if (cfg.mode == 'spatial' and cfg.pretrain_dataset == 'Anet') or cfg.pretrain_dataset == 'KnetV3':
     feature_dim = 2048
 else:
     feature_dim = 1024
 
-models_dir = get_models_dir(mode, pretrain_dataset, method)
+models_dir = get_models_dir(cfg.model_dir, cfg.mode, cfg.pretrain_dataset, cfg.method)
 models_file_prefix = join(models_dir, 'model-ep')
-test_checkpoint_file = join(models_dir, 'model-ep-10')
-predict_file = get_predict_result_path(mode, pretrain_dataset, method)
+test_checkpoint_file = join(models_dir, 'model-ep-30')
+predict_file = get_predict_result_path(cfg.results_dir, cfg.mode, cfg.pretrain_dataset, cfg.method)
 
 
 ######################################### TRAIN ##########################################
@@ -137,13 +154,13 @@ def train_main(config):
     optimizer, loss, trainable_variables, main_class_loss, main_loc_loss, main_conf_loss, main_fuse_loss = \
         train_operation(X, Y_label, Y_bbox, Index, LR, config)
 
-    model_saver = tf.train.Saver(var_list=trainable_variables, max_to_keep=5)
+    model_saver = tf.train.Saver(var_list=trainable_variables, max_to_keep=6)
 
     sess = tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=False))
 
     tf.global_variables_initializer().run()
 
-    log_dir = './logs/' + mode + pretrain_dataset + method
+    log_dir = cfg.log_dir + cfg.mode + cfg.pretrain_dataset + cfg.method
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -162,7 +179,7 @@ def train_main(config):
         model_saver.restore(sess, restore_checkpoint_file)
 
     batch_train_dataX, batch_train_gt_label, batch_train_gt_info, batch_train_index = \
-        get_train_data(config, mode, pretrain_dataset, True)
+        get_train_data(config, cfg.mode, cfg.pretrain_dataset, True)
     num_batch_train = len(batch_train_dataX)
 
     for epoch in range(init_epoch, config.training_epochs):
@@ -193,7 +210,7 @@ def train_main(config):
 
         print ("Training epoch ", epoch, " loss: ", np.mean(loss_info))
 
-        if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch == 5 or epoch == 10:
+        if epoch == config.training_epochs - 2 or epoch == config.training_epochs - 1 or epoch % 6 == 0:
         # if epoch == 5 or epoch == 10:
             model_saver.save(sess, models_file_prefix, global_step=epoch)
 
@@ -231,7 +248,7 @@ def test_operation(X, config):
 
 
 def test_main(config):
-    batch_dataX, batch_winInfo = get_test_data(config, mode, pretrain_dataset)
+    batch_dataX, batch_winInfo = get_test_data(config, cfg.mode, cfg.pretrain_dataset)
 
     X = tf.placeholder(tf.float32, shape=(config.batch_size, config.input_steps, feature_dim))
 
@@ -276,29 +293,29 @@ if __name__ == "__main__":
     start_time = time.time()
     elapsed_time = 0
 
-    if not os.path.exists('./models'):
-        os.makedirs('./models')
-    if not os.path.exists('./logs'):
-        os.makedirs('./logs')
-    if not os.path.exists('./results'):
-        os.makedirs('./results')
+    if not os.path.exists(cfg.model_dir):
+        os.makedirs(cfg.model_dir)
+    if not os.path.exists(cfg.log_dir):
+        os.makedirs(cfg.log_dir)
+    if not os.path.exists(cfg.results_dir):
+        os.makedirs(cfg.results_dir)
 
-    if stage == 'train':
+    if cfg.stage == 'train':
         train_main(config)
         elapsed_time = time.time() - start_time
-    elif stage == 'test':
+    elif cfg.stage == 'test':
         df = test_main(config)
         elapsed_time = time.time() - start_time
-        final_result_process(stage, pretrain_dataset, config, mode, method, '', df)
-    elif stage == 'fuse':
-        final_result_process(stage, pretrain_dataset, config, mode, method, method_temporal)
+        final_result_process(cfg.stage, cfg.pretrain_dataset, config, cfg.mode, cfg.method, '', df)
+    elif cfg.stage == 'fuse':
+        final_result_process(cfg.stage, cfg.pretrain_dataset, config, cfg.mode, cfg.method, cfg.method_temporal)
         elapsed_time = time.time() - start_time
-    elif stage == 'train_test_fuse':
+    elif cfg.stage == 'train_test_fuse':
         train_main(config)
         elapsed_time = time.time() - start_time
         tf.reset_default_graph()
         df = test_main(config)
-        final_result_process(stage, pretrain_dataset, config, mode, method, '', df)
+        final_result_process(cfg.stage, cfg.pretrain_dataset, config, cfg.mode, cfg.method, '', df)
     else:
-        print ("No stage", stage, "Please choose a stage from train/test/fuse/train_test_fuse.")
+        print ("No stage", cfg.stage, "Please choose a stage from train/test/fuse/train_test_fuse.")
     print ("Elapsed time:", elapsed_time, "start time:", start_time)
